@@ -1,0 +1,12 @@
+Name,Code,ID
+Communication Services,COMM_SERV,50
+Consumer Discretionary,CONS_DISC,25
+Consumer Staples,CONS_STAP,30
+Eneregy,ENERGY,10
+Financials,FINANCIALS,40
+Health Care,HEALTH_CARE,35
+Industrials,INDUSTRIALS,20
+Information Technology,INFO_TECH,45
+Materials,MATERIALS,15
+Real Estate,REAL_ESTATE,60
+Utilities,UTILITIES,55
