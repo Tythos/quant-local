@@ -6,8 +6,10 @@ import re
 import csv
 import math
 import pprint
+import warnings
 import xlrd
 import numpy
+import openpyxl
 
 MOD_PATH, _ = os.path.split(os.path.abspath(__file__))
 DATASTORE_PATH = MOD_PATH + "/datastore"
@@ -25,11 +27,8 @@ def getDatePaths():
 def getSectorsTable():
     """Returns dictionary entries in the Sectors table
     """
-    sectorsPath = DATASTORE_PATH + "/sectors.csv"
-    with open(sectorsPath, 'r') as f:
-        dr = csv.DictReader(f)
-        rows = [row for row in dr]
-    return rows
+    datePaths = getDatePaths()
+    return readXlsxDicts(datePaths[-1] + "/sectors.xlsx")
 
 def getSectorPaths(datePath):
     """Returns absolute paths to all available sector spreadsheets acquired on
@@ -61,9 +60,7 @@ class Filter(object):
            Three comparison types are supported: string, numeric, and dollar.
            Dollar values are encoded as strings but begin with the "$"
            character and may be suffixed by a "k", "M", or "B" magnitude. These
-           are cast to numeric values before a comparison is made. If an error
-           occurs, the property is likely ill-formed and the filter is
-           therefore rejected.
+           are cast to numeric values before a comparison is made.
         """
         try:
             lhs = symbProps[self.property]
@@ -98,31 +95,41 @@ class Filter(object):
                 return self.compareGT(lhs, self.value)
             else:
                 raise Exception("Invalid comparator '%s'" % self.comparator)
-        except Exception:
+        except Exception as e:
+            warnings.warn("\n".join([
+                "Exception while evaluating:",
+                "\tSecurity %s" % symbProps["Symbol"],
+                "\tAgainst filter (%s,%s,%s)" % (self.property, self.comparator, str(self.value))
+            ]))
             return False
 
     def compareLT(self, lhs, rhs):
         """For inequality this is asserted to be numeric-only lesser-than
         """
-        assert(type(lhs) is type(0.0))
-        assert(type(rhs) is type(0.0))
+        assert(type(lhs) in [type(0), type(0.0)])
+        assert(type(rhs) in [type(0), type(0.0)])
         return lhs < rhs
 
     def compareLE(self, lhs, rhs):
         """For inequality this is asserted to be numeric-only
            lesser-than-or-equal-to
         """
-        assert(type(lhs) is type(0.0))
-        assert(type(rhs) is type(0.0))
+        assert(type(lhs) in [type(0), type(0.0)])
+        assert(type(rhs) in [type(0), type(0.0)])
         return lhs <= rhs
 
     def compareEQ(self, lhs, rhs):
         """Switches specific comparison based on types; numeric is evaluated
            within relative tolerance (against RHS value specified in filter
-           constructor), and string comparison is are case-insensitive.
+           constructor), and string comparison is are case-insensitive. This
+           interface is also used to define a NEQ (not equal) operation. We
+           also now support/check-for bool-type comparisons, assuming they have
+           both been cast to native 'bool' values upon deserialization.
         """
         assert(type(lhs) is type(rhs))
-        if type(lhs) is type(0.0):
+        if type(lhs) is type(True):
+            return lhs == rhs
+        elif type(lhs) in [type(0), type(0.0)]:
             return abs(rhs - lhs) / rhs < self.numRelTol
         elif type(lhs) is type(""):
             return lhs.lower() == rhs.lower()
@@ -133,15 +140,15 @@ class Filter(object):
         """For inequality this is asserted to be numeric-only
            greater-than-or-equal-to
         """
-        assert(type(lhs) is type(0.0))
-        assert(type(rhs) is type(0.0))
+        assert(type(lhs) in [type(0), type(0.0)])
+        assert(type(rhs) in [type(0), type(0.0)])
         return lhs >= rhs
 
     def compareGT(self, lhs, rhs):
         """For inequality this is asserted to be numeric-only lesser-than
         """
-        assert(type(lhs) is type(0.0))
-        assert(type(rhs) is type(0.0))
+        assert(type(lhs) in [type(0), type(0.0)])
+        assert(type(rhs) in [type(0), type(0.0)])
         return lhs > rhs
 
 class Sector(object):
@@ -198,11 +205,12 @@ def getSectors():
     """
     """
     datePaths = getDatePaths()
-    sectorPaths = getSectorPaths(datePaths[0])
+    sectorPaths = getSectorPaths(datePaths[-1])
     return [Sector(sectorPath) for sectorPath in sectorPaths]
 
-def filterSymbols(sectors, filters):
-    """
+def filterBuys(sectors, filtersBuy):
+    """Returns dictionary mapping sector codes to lists of symbols that passed
+       all buy filters.
     """
     allPassed = {}
     for sector in sectors:
@@ -211,29 +219,105 @@ def filterSymbols(sectors, filters):
         symbols = sector.getSymbols()
         for symbol in symbols:
             security = sector.getSecurity(symbol)
-            for ndx, fltr in enumerate(filters):
+            for ndx, fltr in enumerate(filtersBuy):
                 if not fltr.isOkay(security):
                     break
-                elif ndx == len(filters) - 1:
+                elif ndx == len(filtersBuy) - 1:
                     secPassed.append(symbol)
         if 0 < len(secPassed):
             allPassed[code] = secPassed
     return allPassed
 
-def getFilters():
+def filterSells(positions, filtersSell):
+    """Returns dictionary mapping sector codes to lists of symbols that passed
+       all sell filters.
     """
+    allPassed = {}
+    for position in positions:
+        if position["sector"] not in allPassed:
+            allPassed[position["sector"]] = []
+        for ndx, fltr in enumerate(filtersSell):
+            if not fltr.isOkay(position):
+                break
+            elif ndx == len(filtersSell) - 1:
+                allPassed[position["sector"]].append(position["symbol"])
+    return allPassed
+
+def readXlsDicts(xlsPath, sheetName=None):
+    """Reads an .XLS file and returns a list of dictionaries corresponding to
+       the continuous table in the given sheet (defaults to the first sheet if
+       no name is specified).
     """
-    return [
-        Filter("Company Headquarters Location", "==", "United States of America"),
-        Filter("Equity Summary Score from StarMine from Refinitiv", "==", "Very Bullish"),
-        Filter("Security Price", ">", 10.0),
-        Filter("Security Price", "<", 100.0),
-        Filter("Market Capitalization", ">=", 1e9),
-        Filter("Price Performance (52 Weeks)", ">", 0.0)
-    ]
+    wb = xlrd.open_workbook(xlsPath)
+    sheet_names = wb.sheet_names()
+    sheet_ndx = 0
+    if sheetName is not None:
+        sheet_ndx = sheet_names.index(sheetName)
+    ws = wb.sheet_by_index(sheet_ndx)
+    header = ws.row_values(0)
+    rows = []
+    for i in range(ws.nrows):
+        rv = ws.row_values(i+1)
+        if len("".join([str(v) for v in rv]).strip()) == 0:
+            break
+        assert(len(rv) == len(header))
+        entry = {}
+        for j, key in enumerate(header):
+            entry[key] = rv[j]
+        rows.append(entry)
+    return rows
+
+def readXlsxDicts(xlsxPath, sheetName=None):
+    """Reads an .XLSX file and returns a list of dictionaries corresponding to
+       the continuous table in the given sheet (defaults to the first sheet if
+       no name is specified).
+    """
+    wb = openpyxl.open(xlsxPath)
+    sheet_names = wb.sheetnames
+    sheet_ndx = 0
+    if sheetName is not None:
+        sheet_ndx = sheet_names.index(sheetName)
+    ws = wb.worksheets[sheet_ndx]
+    header = []
+    rows = []
+    for i, row in enumerate(ws.rows):
+        if i == 0:
+            header = [cell.value for cell in row]
+        else:
+            rv = [cell.value for cell in row]
+            if len("".join([str(v) for v in rv]).strip()) == 0:
+                break
+            assert(len(rv) == len(header))
+            entry = {}
+            for j, key in enumerate(header):
+                entry[key] = rv[j]
+            rows.append(entry)
+    return rows
+
+def getFiltersBuy():
+    """Returns "buy" filter Objects as deserialized from the lone worksheet in
+       the "datastore/filters_buy.xlsx" file.
+    """
+    datePaths = getDatePaths()
+    rows = readXlsxDicts(datePaths[-1] + "/filters_buy.xlsx")
+    filters = []
+    for row in rows:
+        filters.append(Filter(row["property"], row["comparator"], row["value"]))
+    return filters
+
+def getFiltersSell():
+    """Returns "sell" filter Objects as deserialized from the lone worksheet in
+       the "datastore/filters_sell.xlsx" file.
+    """
+    datePaths = getDatePaths()
+    rows = readXlsxDicts(datePaths[-1] + "/filters_sell.xlsx")
+    filters = []
+    for row in rows:
+        filters.append(Filter(row["property"], row["comparator"], row["value"]))
+    return filters
 
 def getMetrics(sector, symbols):
-    """Returns a 2xn numpy.Array of metrics for the given symbols from the
+    """Returns a 2xN numpy.Array of metrics for the given symbols from the
        given sector.
     """
     metrics = [ # hard-coded for now, could easily be parameterized
@@ -261,22 +345,97 @@ def getFrontier(x, y):
             y_ = y[i]
     return indices[-1::-1]
 
+def getPositions(sectors):
+    """In addition to position information stored in positions.xlsx, augments
+       with specific security information gleaned from that sector.
+    """
+    datePaths = getDatePaths()
+    positions = readXlsxDicts(datePaths[-1] + "/positions.xlsx")
+    codes = [sector.getCode() for sector in sectors]
+    for position in positions:
+        sector_ndx = codes.index(position["sector"])
+        sector = sectors[sector_ndx]
+        security = sector.getSecurity(position["symbol"])
+        position.update(security)
+    return positions
+
+def getSectorByCode(sectors, code):
+    """
+    """
+    for sector in sectors:
+        if sector.getCode() == code:
+            return sector
+    raise Exception("Could not find sector matching code %s" % code)
+
+def updatePositions(positions):
+    """Adjusts the positions list and writes the results back out to the most
+       recent positions.xlsx file. Latest price values are updated from the
+       adjacent sector-specific spreadsheet.
+    """
+    # first cache map of symbols->sectors
+    sectors = getSectors()
+    ssMap = {}
+    for sector in sectors:
+        code = sector.getCode()
+        symbols = sector.getSymbols()
+        for symbol in symbols:
+            ssMap[symbol] = code
+    # now retrieve latest price
+    for position in positions:
+        symbol = position["symbol"]
+        code = ssMap[symbol]
+        sector = getSectorByCode(sectors, code)
+        security = sector.getSecurity(symbol)
+        position["latest_price"] = "$%.2f" % security["Security Price"]
+    pprint.pprint(positions)
+    # finally, write back out to latest datastore .CSV file
+    #datePaths = getDatePaths()
+    #datePath = datePaths[-1]
+    #_, date = os.path.split(datePath)
+    #positionsPath = datePath + "/positions.csv"
+    #fieldnames = list(positions[0].keys())
+    #with open(positionsPath, 'w') as f:
+    #    dw = csv.DictWriter(f, fieldnames=fieldnames, lineterminator="\n")
+    #    dw.writeheader()
+    #    dw.writerows(positions)
+
 def main():
     """
     """
     sectors = getSectors()
-    filters = getFilters()
-    allPassed = filterSymbols(sectors, filters)
+    filtersBuy = getFiltersBuy()
+    filtersSell = getFiltersSell()
+    positions = getPositions(sectors)
+    allBuys = filterBuys(sectors, filtersBuy)
+    allSells = filterSells(positions, filtersSell)
+    recs = []
     for sector in sectors:
         code = sector.getCode()
-        if code not in allPassed:
+        if code not in allBuys:
             continue
-        symbols = allPassed[code]
-        xy = getMetrics(sector, symbols)
+        buySymbols = allBuys[code]
+        # filter buys by second-highest frontier in metric space
+        xy = getMetrics(sector, buySymbols)
         frontier = getFrontier(xy[0,:], xy[1,:])
+        ndx = None
         if 1 < len(frontier):
-            ndx = frontier[-2] # second-highest on frontier
-            print("Recommended buy for sector %s: %s" % (sector.getCode(), symbols[ndx]))
+            ndx = frontier[-2]
+            buySymbols = [buySymbols[ndx]]
+        else:
+            buySymbols = []
+        # filter sells
+        sellSymbols = allSells[code]
+        # if a symbol appears in both buys and sells, mark as "HOLD?" instead
+        holdSymbols = list(set(buySymbols).intersection(set(sellSymbols)))
+        print("Recommendations for sector %s:" % code)
+        for symbol in buySymbols:
+            if symbol not in holdSymbols:
+                print("\tBUY %s" % symbol)
+        for symbol in holdSymbols:
+            print("\HOLD? %s" % symbol)
+        for symbol in sellSymbols:
+            if symbol not in holdSymbols:
+                print("\tSELL %s" % symbol)
 
 if __name__ == "__main__":
     main()
