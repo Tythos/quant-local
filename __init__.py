@@ -424,6 +424,8 @@ def main():
         else:
             buySymbols = []
         # filter sells
+        if code not in allSells:
+            allSells[code] = []
         sellSymbols = allSells[code]
         # if a symbol appears in both buys and sells, mark as "HOLD" instead
         holdSymbols = list(set(buySymbols).intersection(set(sellSymbols)))
