@@ -429,7 +429,7 @@ def main():
         sellSymbols = allSells[code]
         # if a symbol appears in both buys and sells, mark as "HOLD" instead
         holdSymbols = list(set(buySymbols).intersection(set(sellSymbols)))
-        ownedSymbols = [position["symbol"] for position in positions if position["is_open"]]
+        ownedSymbols = [position["symbol"] for position in positions]
         print("Recommendations for sector %s:" % code)
         for symbol in buySymbols:
             if symbol not in holdSymbols and symbol not in ownedSymbols:
