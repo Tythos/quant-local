@@ -13,8 +13,11 @@ for each sector. These folders also include tables for:
 
 * Positions (currently open as of that date)
 
-The script in the primary package "__init__.py" file performs the following
-when run from the command line:
+Several stratgies are stored in the "strategies/" folder as Python modules.
+Running a strategy module from the command line will generate analysis (buy and
+sell recommendations) printed to STDOUT, using the most up-to-date data cached
+within the package's "datastore/" folder. For example, the script in 
+"papa_moo.py" performs the following when run from the command line:
 
 1. Filters securities for each sector based on the conditions in the
    "filters_buy.xlsx" spreadsheet
