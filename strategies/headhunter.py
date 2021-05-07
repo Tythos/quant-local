@@ -1,4 +1,4 @@
-"""Survey us energy companies, by market cap:
+"""Survey U.S. energy companies, by market cap:
    * Who is the current ceo, coo, and cfo?
    * Where did they work in the past?
    * Fit security price (with lag?) to participation
@@ -7,3 +7,73 @@
    * Purchase securities with "winners" employed
    * Purchase put options with "losers" employed
 """
+
+import re
+import numpy
+import requests
+import bs4
+import quant_local
+
+#NAME_PREFIXES = ["Mr.", "Ms.", "Mrs.", "Dr."]
+#NAME_SUFFIXES = ["Ph.D.", "Jr.", "Sr."]
+
+def getSecuritiesByMarketCap(sector):
+    """
+    """
+    symbols = sector.getSymbols()
+    securities = [sector.getSecurity(symbol) for symbol in symbols]
+    markCaps = [quant_local.convertDollarString(security["Market Capitalization"]) for security in securities]
+    indices = numpy.argsort(markCaps)[::-1]
+    return [securities[i] for i in indices]
+
+def filterByTitle(person, titles):
+    """Returns True if the given dictionary of person attributes includes a
+       "Title" field in which one of the given title abbreviations exists
+       (False otherwise). This could appear in several different forms:
+       * "CEO" could appear part of a larger title like "CEO & Director"
+       * "CFO" could appear as an abbreviation of sequential terms, like "Chief Financial Officer"
+
+       It may be necessary/desirable to return the SPECIFIC title (or index
+       thereof) that is successfully matched. For the time being, however, we
+       only focus on whether the match is found.
+    """
+    firsts = "".join([w[0] for w in person["Title"].split()])
+    for title in titles:
+        if re.search(title, person["Title"]):
+            return True
+        if re.search(title, firsts):
+            return True
+    return False
+
+def getSecurityCSuite(security, titles=["CEO", "COO", "CFO"]):
+    """This could probably go in the "scrapefe" package
+    """
+    res = requests.get("https://finance.yahoo.com/quote/%s/profile?p=%s" % (security["Symbol"], security["Symbol"]))
+    assert res.status_code == 200
+    soup = bs4.BeautifulSoup(res.content, features="lxml")
+    h3 = soup.findAll("h3", text="Key Executives")[0]
+    cSuiteTable = h3.parent.findAll("table")[0]
+    headers = cSuiteTable.find("thead").findAll("th")
+    headers = [h.text for h in headers]
+    rows = cSuiteTable.find("tbody").findAll("tr")
+    people = []
+    for row in rows:
+        cols = row.findAll("td")
+        person = {}
+        for ndx, key in enumerate(headers):
+            person[key] = cols[ndx].text
+        people.append(person)
+    # now filter by title before returning
+    return [person for person in people if filterByTitle(person, titles)]
+
+def main():
+    """
+    """
+    sectors = quant_local.getSectors()
+    sector = quant_local.getSectorByCode(sectors, "ENERGY")
+    securities = getSecuritiesByMarketCap(sector)
+    for security in securities:
+        csuite = getSecurityCSuite(security)
+
+if __name__ == "__main__":
+   main()

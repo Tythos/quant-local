@@ -7,41 +7,8 @@ import csv
 import math
 import pprint
 import warnings
-import xlrd
 import numpy
-import openpyxl
 import quant_local
-
-PACK_PATH, _ = os.path.split(os.path.abspath(quant_local.__file__))
-DATASTORE_PATH = PACK_PATH + "/datastore"
-
-def getDatePaths():
-    """Returns list of absolute paths to date folders (8-digit names) in the
-       datastore
-    """
-    candidates = []
-    for folderName in os.listdir(DATASTORE_PATH):
-        if re.match("^\d{8}$", folderName):
-            candidates.append(os.path.abspath(DATASTORE_PATH + "/%s" % folderName))
-    return candidates
-
-def getSectorsTable():
-    """Returns dictionary entries in the Sectors table
-    """
-    datePaths = getDatePaths()
-    return readXlsxDicts(datePaths[-1] + "/sectors.xlsx")
-
-def getSectorPaths(datePath):
-    """Returns absolute paths to all available sector spreadsheets acquired on
-       the given date
-    """
-    candidates = []
-    sectors = getSectorsTable()
-    pattern = "^(%s)\.xls$" % "|".join([sector["Code"] for sector in sectors])
-    for fileName in os.listdir(datePath):
-        if re.match(pattern, fileName):
-            candidates.append(os.path.abspath(datePath + "/%s" % fileName))
-    return candidates
 
 class Filter(object):
     """
@@ -66,20 +33,7 @@ class Filter(object):
         try:
             lhs = symbProps[self.property]
             if type(lhs) is type("") and 0 < len(lhs) and lhs[0] == "$":
-                # convert to numerical dollar amount
-                suffix = lhs[-1]
-                if not re.match(r"^\d$", suffix):
-                    lhs = lhs[1:-1]
-                    mag = 0
-                    if suffix == "k":
-                        mag = 3
-                    elif suffix == "M":
-                        mag = 6
-                    elif suffix == "B":
-                        mag = 9
-                    else:
-                        raise Exception("Unsupported financial magnitude suffix '%s'" % suffix)
-                    lhs = float(lhs) * math.pow(10, mag)
+                lhs = quant_local.convertDollarString(lhs)
             if type(self.value) is type(0.0):
                 lhs = float(lhs)
             if self.comparator == "<":
@@ -152,63 +106,6 @@ class Filter(object):
         assert(type(rhs) in [type(0), type(0.0)])
         return lhs > rhs
 
-class Sector(object):
-    """
-    """
-
-    def __init__(self, xlsPath):
-        """
-        """
-        self.sectorPath = xlsPath
-        self.wb = xlrd.open_workbook(xlsPath)
-
-    def getCode(self):
-        """
-        """
-        _, sectorFile = os.path.split(self.sectorPath)
-        sectorCode, _ = os.path.splitext(sectorFile)
-        return sectorCode
-
-    def getSymbols(self):
-        """Returns list of all symbols listed for this sector
-        """
-        sheet_names = self.wb.sheet_names()
-        sheet_ndx = sheet_names.index("Search Criteria")
-        ws = self.wb.sheet_by_index(sheet_ndx)
-        header = ws.row_values(0)
-        col_ndx = header.index("Symbol")
-        symbols = []
-        for row_ndx, row in enumerate(ws.col_values(col_ndx)):
-            if len(row.strip()) == 0:
-                break
-            if row_ndx > 0:
-                symbols.append(row)
-        return symbols
-
-    def getSecurity(self, symbol):
-        """Aggregates all symbol properties across all worksheets
-        """
-        sheet_names = self.wb.sheet_names()
-        properties = {}
-        for sheet_name in sheet_names:
-            sheet_ndx = sheet_names.index(sheet_name)
-            ws = self.wb.sheet_by_index(sheet_ndx)
-            header = ws.row_values(0)
-            symbCol_ndx = header.index("Symbol")
-            symbRow_ndx = ws.col_values(symbCol_ndx).index(symbol)
-            values = ws.row_values(symbRow_ndx)
-            assert(len(header) == len(values))
-            for i in range(len(header)):
-                properties[header[i]] = values[i]
-        return properties
-
-def getSectors():
-    """
-    """
-    datePaths = getDatePaths()
-    sectorPaths = getSectorPaths(datePaths[-1])
-    return [Sector(sectorPath) for sectorPath in sectorPaths]
-
 def filterBuys(sectors, filtersBuy):
     """Returns dictionary mapping sector codes to lists of symbols that passed
        all buy filters.
@@ -244,63 +141,12 @@ def filterSells(positions, filtersSell):
                 allPassed[position["sector"]].append(position["symbol"])
     return allPassed
 
-def readXlsDicts(xlsPath, sheetName=None):
-    """Reads an .XLS file and returns a list of dictionaries corresponding to
-       the continuous table in the given sheet (defaults to the first sheet if
-       no name is specified).
-    """
-    wb = xlrd.open_workbook(xlsPath)
-    sheet_names = wb.sheet_names()
-    sheet_ndx = 0
-    if sheetName is not None:
-        sheet_ndx = sheet_names.index(sheetName)
-    ws = wb.sheet_by_index(sheet_ndx)
-    header = ws.row_values(0)
-    rows = []
-    for i in range(ws.nrows):
-        rv = ws.row_values(i+1)
-        if len("".join([str(v) for v in rv]).strip()) == 0:
-            break
-        assert(len(rv) == len(header))
-        entry = {}
-        for j, key in enumerate(header):
-            entry[key] = rv[j]
-        rows.append(entry)
-    return rows
-
-def readXlsxDicts(xlsxPath, sheetName=None):
-    """Reads an .XLSX file and returns a list of dictionaries corresponding to
-       the continuous table in the given sheet (defaults to the first sheet if
-       no name is specified).
-    """
-    wb = openpyxl.open(xlsxPath)
-    sheet_names = wb.sheetnames
-    sheet_ndx = 0
-    if sheetName is not None:
-        sheet_ndx = sheet_names.index(sheetName)
-    ws = wb.worksheets[sheet_ndx]
-    header = []
-    rows = []
-    for i, row in enumerate(ws.rows):
-        if i == 0:
-            header = [cell.value for cell in row]
-        else:
-            rv = [cell.value for cell in row]
-            if len("".join([str(v) for v in rv]).strip()) == 0:
-                break
-            assert(len(rv) == len(header))
-            entry = {}
-            for j, key in enumerate(header):
-                entry[key] = rv[j]
-            rows.append(entry)
-    return rows
-
 def getFiltersBuy():
     """Returns "buy" filter Objects as deserialized from the lone worksheet in
        the "datastore/filters_buy.xlsx" file.
     """
-    datePaths = getDatePaths()
-    rows = readXlsxDicts(datePaths[-1] + "/filters_buy.xlsx")
+    datePaths = quant_local.getDatePaths()
+    rows = quant_local.readXlsxDicts(datePaths[-1] + "/filters_buy.xlsx")
     filters = []
     for row in rows:
         filters.append(Filter(row["property"], row["comparator"], row["value"]))
@@ -310,8 +156,8 @@ def getFiltersSell():
     """Returns "sell" filter Objects as deserialized from the lone worksheet in
        the "datastore/filters_sell.xlsx" file.
     """
-    datePaths = getDatePaths()
-    rows = readXlsxDicts(datePaths[-1] + "/filters_sell.xlsx")
+    datePaths = quant_local.getDatePaths()
+    rows = quant_local.readXlsxDicts(datePaths[-1] + "/filters_sell.xlsx")
     filters = []
     for row in rows:
         filters.append(Filter(row["property"], row["comparator"], row["value"]))
@@ -346,28 +192,6 @@ def getFrontier(x, y):
             y_ = y[i]
     return indices[-1::-1]
 
-def getPositions(sectors):
-    """In addition to position information stored in positions.xlsx, augments
-       with specific security information gleaned from that sector.
-    """
-    datePaths = getDatePaths()
-    positions = readXlsxDicts(datePaths[-1] + "/positions.xlsx")
-    codes = [sector.getCode() for sector in sectors]
-    for position in positions:
-        sector_ndx = codes.index(position["sector"])
-        sector = sectors[sector_ndx]
-        security = sector.getSecurity(position["symbol"])
-        position.update(security)
-    return positions
-
-def getSectorByCode(sectors, code):
-    """
-    """
-    for sector in sectors:
-        if sector.getCode() == code:
-            return sector
-    raise Exception("Could not find sector matching code %s" % code)
-
 def updatePositions(positions):
     """Adjusts the positions list and writes the results back out to the most
        recent positions.xlsx file. Latest price values are updated from the
@@ -385,28 +209,18 @@ def updatePositions(positions):
     for position in positions:
         symbol = position["symbol"]
         code = ssMap[symbol]
-        sector = getSectorByCode(sectors, code)
+        sector = quant_local.getSectorByCode(sectors, code)
         security = sector.getSecurity(symbol)
         position["latest_price"] = "$%.2f" % security["Security Price"]
     pprint.pprint(positions)
-    # finally, write back out to latest datastore .CSV file
-    #datePaths = getDatePaths()
-    #datePath = datePaths[-1]
-    #_, date = os.path.split(datePath)
-    #positionsPath = datePath + "/positions.csv"
-    #fieldnames = list(positions[0].keys())
-    #with open(positionsPath, 'w') as f:
-    #    dw = csv.DictWriter(f, fieldnames=fieldnames, lineterminator="\n")
-    #    dw.writeheader()
-    #    dw.writerows(positions)
 
 def main():
     """
     """
-    sectors = getSectors()
+    sectors = quant_local.getSectors()
     filtersBuy = getFiltersBuy()
     filtersSell = getFiltersSell()
-    positions = getPositions(sectors)
+    positions = quant_local.getPositions(sectors)
     allBuys = filterBuys(sectors, filtersBuy)
     allSells = filterSells(positions, filtersSell)
     recs = []
