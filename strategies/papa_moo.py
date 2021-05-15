@@ -172,10 +172,18 @@ def getMetrics(sector, symbols):
         "Standard Deviation (1 Yr Annualized)"
     ]
     table = numpy.zeros((2, len(symbols)))
+    toDelete = [] # columns (symbols) to remove once populated
     for i, metric in enumerate(metrics):
         for j, symbol in enumerate(symbols):
-            security = sector.getSecurity(symbol)
-            table[i,j] = security[metric]
+            try:
+                security = sector.getSecurity(symbol)
+                table[i,j] = security[metric]
+            except Exception as e:
+                warnings.warn("Could not extract metric %s for symbol %s" % (metric, symbol))
+                print(e)
+                toDelete.append(j)
+    for j in toDelete[::-1]:
+        table = numpy.delete(table, j, 1)
     return table
 
 def getFrontier(x, y):
