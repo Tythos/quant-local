@@ -9,6 +9,7 @@
 """
 
 import re
+import json
 import numpy
 import requests
 import bs4
@@ -16,6 +17,7 @@ import quant_local
 
 #NAME_PREFIXES = ["Mr.", "Ms.", "Mrs.", "Dr."]
 #NAME_SUFFIXES = ["Ph.D.", "Jr.", "Sr."]
+BLOOMBERG_SEARCH_URL = r"https://search.bloomberg.com/lookup.json?types=Person&exclude_subtypes=label:editorial&group_size=1&fields=url&query=%s%s%s"
 
 def getSecuritiesByMarketCap(sector):
     """
@@ -45,6 +47,27 @@ def filterByTitle(person, titles):
             return True
     return False
 
+def addNameIdentifiers(officer):
+    """Given the "name" field of a chief officer, returns a (hopefully) unique
+       identifier consisting of:
+       * Best-guess last name
+       * Best-guess first name
+       * Date of birth (YYYY)
+
+       ...concatenated by underscore ("_"). This identifier will be used to
+       search and compile a dossier on that particular individual. First and
+       last names are chosen after the name parts have been split and any parts
+       ending in a period ("Mr.", "Dr.", "Jr.", "PhD.", etc.).
+    """
+    parts = officer["Name"].split()
+    n = len(parts)
+    for i in range(n-1, -1, -1):
+        if parts[i].endswith("."):
+            parts.pop(i)
+    officer["Identifier"] = "%s_%s_%u" % (parts[-1].lower(), parts[0].lower(), int(officer["Year Born"]))
+    officer["First"] = parts[0]
+    officer["Last"] = parts[-1]
+
 def getSecurityCSuite(security, titles=["CEO", "COO", "CFO"]):
     """This could probably go in the "scrapefe" package
     """
@@ -63,9 +86,22 @@ def getSecurityCSuite(security, titles=["CEO", "COO", "CFO"]):
         for ndx, key in enumerate(headers):
             person[key] = cols[ndx].text
         people.append(person)
-    # now filter by title before returning
-    return [person for person in people if filterByTitle(person, titles)]
+    # now filter by title, and augment with identifier, before returning
+    officers = [person for person in people if filterByTitle(person, titles)]
+    for officer in officers:
+        addNameIdentifiers(officer)
+    return officers
 
+def getBloombergProfile(officer):
+    """Uses a site-specific search in an attempt to look up the unique ID used
+       by their Bloomberg profile page.
+    """
+    url = BLOOMBERG_SEARCH_URL % (officer["First"], "%20", officer["Last"])
+    res = requests.get(url)
+    data = json.loads(res)
+    profileUrl = data[0]["results"][0]["url"]
+    officer["BloombergId"] = int(profileUrl.split("/")[-1])
+    
 def main():
     """
     """
@@ -74,6 +110,8 @@ def main():
     securities = getSecuritiesByMarketCap(sector)
     for security in securities:
         csuite = getSecurityCSuite(security)
+        for officer in csuite:
+
 
 if __name__ == "__main__":
    main()

@@ -1,4 +1,6 @@
-"""
+"""Base module for the quant_local Python package. Contains common models and
+   utilities, like the Sector class and dollar string conversions. Specific
+   strategies are under the "strategies" subpackage.
 """
 
 import os
@@ -65,14 +67,16 @@ def getSectorPaths(datePath):
     return candidates
 
 def getSectors():
-    """
+    """Returns a list of Sector objects as parsed from the most recent
+       datastore snapshot.
     """
     datePaths = getDatePaths()
     sectorPaths = getSectorPaths(datePaths[-1])
     return [Sector(sectorPath) for sectorPath in sectorPaths]
 
 def getSectorByCode(sectors, code):
-    """
+    """Returns a specific Sector object as identified by the name/code (as
+       returned by *Sector.getCode()*).
     """
     for sector in sectors:
         if sector.getCode() == code:
@@ -145,17 +149,25 @@ def readXlsxDicts(xlsxPath, sheetName=None):
     return rows
 
 class Sector(object):
-    """
+    """Models a specific sector of industry, as organized under the Fidelity
+       dashboard categorization. Specific sector properties can be seen in the
+       "sectors.xlsx" spreadsheet captured under a specific datastore snapshot.
     """
 
     def __init__(self, xlsPath):
-        """
+        """Initializes a sector model from a given spreadsheet. (For example,
+           the energy sector would be initialized from the *ENERGY.xlsx*
+           spreadsheet.) Sector spreadsheets are organized under specific
+           datastore snapshots.
         """
         self.sectorPath = xlsPath
         self.wb = xlrd.open_workbook(xlsPath)
 
     def getCode(self):
-        """
+        """Returns the code for this sector. A "code" is the alphabetic
+           shorthand/abbreviation for a specific sector, as identified by
+           filename (and referenced by the Fidelity API / URL scheme). For
+           example, "CONS_DISC" is "consumer (discretionary)".
         """
         _, sectorFile = os.path.split(self.sectorPath)
         sectorCode, _ = os.path.splitext(sectorFile)

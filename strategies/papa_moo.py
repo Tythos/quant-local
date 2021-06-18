@@ -1,21 +1,27 @@
-"""
+"""The "papa_moo" strategy is a multi-objective optimization approach evaluated
+   on a sector-by-sector basis. A frontier is constructed for each sector that
+   (after securities are passed through a set of "buy" filters) defines a
+   MPT-like high-return, low-risk curve. The second-highest point on this curve
+   is selected for recommendation in each sector (assuming it is not already
+   owned).
 """
 
-import os
-import re
-import csv
-import math
 import pprint
 import warnings
 import numpy
 import quant_local
 
 class Filter(object):
-    """
+    """Models a specific filter used by the papa_moo strategy. (Filters,
+       however, could theoretically be useful for multiple strategies, in which
+       case this may move to the top-level package module.) Filters are a
+       combination of properties, comparators, and values, and have a built-in
+       numerical (relative) tolerance for evaluation.
     """
 
     def __init__(self, prop, comparator, value):
-        """
+        """Filters must be constructed with a specific property, comparator,
+           and value. This facilitates deserialization from spreadsheet.
         """
         self.property = prop
         self.comparator = comparator
@@ -206,7 +212,7 @@ def updatePositions(positions):
        adjacent sector-specific spreadsheet.
     """
     # first cache map of symbols->sectors
-    sectors = getSectors()
+    sectors = quant_local.getSectors()
     ssMap = {}
     for sector in sectors:
         code = sector.getCode()
@@ -223,7 +229,12 @@ def updatePositions(positions):
     pprint.pprint(positions)
 
 def main():
-    """
+    """When invoked as an entry point, the papa_moo strategy iterates over all
+       sectors to perform a MPT-like multi-objective optimization for low-risk,
+       high-return securities (as defined by standard-deviation and
+       52-week-return, respectively). Some "SELL" recommendations are also made
+       based on the "SELL" filters, but these involve no optimization and are
+       merely filter/condition checks.
     """
     sectors = quant_local.getSectors()
     filtersBuy = getFiltersBuy()
@@ -231,7 +242,6 @@ def main():
     positions = quant_local.getPositions(sectors)
     allBuys = filterBuys(sectors, filtersBuy)
     allSells = filterSells(positions, filtersSell)
-    recs = []
     for sector in sectors:
         code = sector.getCode()
         if code not in allBuys:
