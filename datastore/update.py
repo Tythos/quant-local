@@ -17,6 +17,13 @@ def getSnapshotPath(date):
     """
     return ql.DATASTORE_PATH + "/%s" % date.strftime("%Y%m%d")
     
+def getIsTodayExists():
+    """Returns True if there already exists a snapshot for today
+    """
+    date = datetime.date.today()
+    toPath = getSnapshotPath(date)
+    return os.path.isdir(toPath)
+
 def createNewSnapshot():
     """Copies the most recent snapshot to create a new one. Returns the
        datetime object used to determine today's date, for subsequent
@@ -54,12 +61,37 @@ def openSectorTabs(date):
         url = FIDELITY_SECTOR_URL % sector["ID"]
         webbrowser.open(url)
 
+def renameXlsxSectors():
+    """
+    """
+    date = datetime.date.today()
+    sectorTable = getSectorTable(date)
+    snapshotPath = getSnapshotPath(date)
+    for filename in os.listdir(snapshotPath):
+        if filename.endswith(".xls"):
+            absPath = os.path.abspath(snapshotPath + "/%s" % filename)
+            basics = ql.readXlsDicts(absPath, "Search Criteria")
+            sectorName = basics[0]["Sector"]
+            sectorCode = None
+            for sector in sectorTable:
+                if sector["Name"] == sectorName:
+                    sectorCode = sector["Code"]
+            if sectorCode is None:
+                raise Exception("Unable to find matching sector for name '%s'" % sectorName)
+            newPath = os.path.abspath(snapshotPath + "/%s.xls" % sectorCode)
+            shutil.move(absPath, newPath)
+
 def main():
     """
     """
-    date = createNewSnapshot()
-    clearSnapshotSectors(date)
-    openSectorTabs(date)
+    if not getIsTodayExists():
+        # first pass: create snapshot, open tabs
+        date = createNewSnapshot()
+        clearSnapshotSectors(date)
+        openSectorTabs(date)
+    else:
+        # second pass: rename spreadsheets by sector
+        renameXlsxSectors()
 
 if __name__ == "__main__":
     main()
