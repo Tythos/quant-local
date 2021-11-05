@@ -69,6 +69,7 @@ SYMBOLS = [
     "TMO",
     "WAT"
 ] # sector=healthcare; industry=life sciences; hq=usa
+SYMBOLS.sort()
 
 def singleSymbol(symbol):
     """Evaluates a bollinger band strategy from Alpaca-driven historical data
