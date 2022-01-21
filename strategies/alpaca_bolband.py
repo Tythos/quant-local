@@ -84,20 +84,24 @@ def singleSymbol(symbol):
     lower = numpy.median(close) - numpy.std(close)
     upper = numpy.median(close) + numpy.std(close)
     if close[-1] < lower:
-        return "BUY"
+        norm = (close[-1] - lower) / (upper - lower)
+        return (symbol, "BUY", norm)
     elif upper < close[-1]:
-        return "SELL"
+        norm = (upper - close[-1]) / (upper - lower)
+        return (symbol, "SELL", norm)
     else:
-        return "HOLD"
+        return (symbol, "HOLD", 0)
 
 def main():
     """Iterates over SYMBOLS to report strategy actions (non-holds)
     """
-    for symbol in SYMBOLS:
-        action = singleSymbol(symbol)
-        if action == "HOLD":
+    actions = [singleSymbol(symbol) for symbol in SYMBOLS]
+    ndcs = numpy.argsort([a[2] for a in actions])
+    actions = [actions[i] for i in ndcs]
+    for action in actions:
+        if action[1] == "HOLD":
             continue
-        print("%s: %s" % (symbol, action))
+        print("%s: %s (%f)" % (action[0], action[1], action[2] * 100))
 
 if __name__ == "__main__":
     main()
