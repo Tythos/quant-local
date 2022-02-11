@@ -1,0 +1,3 @@
+"""
+Fourier-filtered securities
+"""
